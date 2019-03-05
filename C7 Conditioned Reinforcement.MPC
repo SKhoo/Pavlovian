@@ -1,0 +1,391 @@
+\-------------------------------------------------------------------------
+\ C7 Conditioned Reinforcement
+\ Version: 1.00
+\ Created by Shaun Khoo (22 October 2018) for Chaudhri Lab boxes
+\ >('.')<
+\ http://orcid.org/0000-0002-0972-3788
+\-------------------------------------------------------------------------
+
+\CONSTANTS
+\SESSION CONTROL VARIABLES
+^SessionLength = 60		\Session length in minutes
+^Timebins = 12			\Number of timebins
+^InitialFR = 1			\Initial fixed ratio
+^VRAfter = 3			\Switch to a VR schedule after this many CS+ presentations
+^CSduration = 25		\CS duration in deciseconds (will be divided by 10)
+^NoseOption = 0			\Set CS+ Nosepoke Based on BOX = 0, Left Nosepoke = 1, Right Nosepoke = 2
+^Comeback = 5			\Display a time (in minutes) to come back before the session finishes
+^Version = 100			
+
+\INPUTS
+^LeftLever = 1			\Left Lever
+^RightLever = 2			\Right Lever
+^PortEntry = 3			\PortEntry used as a start button
+^LeftNose = 5
+^RightNose = 6
+
+\OUTPUTS
+^LeftExt = 1        		\Extend the left lever
+^RightExt = 2        		\Extend the right lever
+^LeftCueLight = 3        	\Not used in this program
+^RightCueLight = 4        	\Not used in this program
+^Houselight = 5
+^Clicker = 6			\Not used in this program
+^Whitenoise = 7			\Not used in this program
+^Pump = 8			\Not used in this program
+
+\Z-PULSES
+^CSplus = 1
+^EndCSplus = 2
+^CSminus = 3
+^EndCSminus = 4
+^Shutdown = 5
+
+\VARIABLES
+\VARIABLES - DATA - Session Totals
+DIM A = 14
+\CS+ Nosepokes = A(0)
+\CS- Nosepokes = A(1)
+\CS+ Lever Presentations = A(2)
+\CS- Lever Presentations = A(3)
+\CS+ Lever Activations = A(4)
+\CS- Lever Activations = A(5)
+\CS+ Timeout Nosepokes = A(6)
+\CS- Timeout Nosepokes = A(7)
+\Latency to first CS+ Nosepoke = A(8)
+\Latency to first CS- Nosepoke = A(9)
+\Latency to first CS+ Lever Presentation = A(10)
+\Latency to first CS- Lever Presentation = A(11)
+\Latency to first CS+ Lever Activation = A(12)
+\Latency to first CS- Lever Activation = A(13)
+var_alias Weight = A(14)
+
+\VARIABLES - DATA - Timecourse Arrays
+DIM B = 50000		\CS+ Nosepokes,			subscript N
+DIM C = 50000		\CS- Nosepokes,			subscript O
+DIM D = 50000		\CS+ Lever Presentations,	subscript P
+DIM E = 50000		\CS- Lever Presentations,	subscript Q
+DIM F = 50000		\CS+ Lever Activations,		subscript R
+DIM G = 50000		\CS- Lever Activations,		subscript S
+
+\VARIABLES - DATA - Timecourse Arrays
+DIM H = 5000		\CS+ Nosepokes,			subscript T
+DIM I = 5000		\CS- Nosepokes,			subscript T
+DIM J = 5000		\CS+ Lever Presentations,	subscript T
+DIM K = 5000		\CS- Lever Presentations,	subscript T
+DIM L = 5000		\CS+ Lever Activations,		subscript T
+DIM M = 5000		\CS- Lever Activations,		subscript T
+
+\VARIABLES - CONTROL - WORKING VARIABLES
+DIM X = 7
+\X(0) = Session Clock (seconds)
+\X(1) = Centisecond Clock
+\X(2) = Timebin Clock
+\X(3) = Re-zeroing CS+ response counter
+\X(4) = Responses required for next CS+
+\X(5) = Re-zeroing CS- response counter
+\X(6) = Responses required for next CS-
+\X(7) = CS Duration
+
+\VARIABLES - CONTROL - VARIABLE RATIO
+\CS+ and CS- run on separate lists because they will be using the
+\RANDD function and they should be independent of each other.
+LIST U = 1, 1, 1, 2, 2, 2, 3, 3, 3	\List for CS+
+LIST V = 1, 1, 1, 2, 2, 2, 3, 3, 3	\List for CS-
+
+\VARIABLES - CONTROL - SESSION PARAMETERS
+DIM Z = 13
+var_alias Session Length (min) = Z(0)
+var_alias Number of Timebins = Z(1)
+var_alias Initial Fixed Ratio = Z(2)
+var_alias Variable Ratio After = Z(3)
+var_alias Variable Ratio = Z(4)
+var_alias CS Duration (s) = Z(5)
+var_alias CS+ Nosepoke = Z(6)
+var_alias CS- Nosepoke = Z(7)
+var_alias CS+ Lever Output = Z(8)
+var_alias CS- Lever Output = Z(9)
+var_alias CS+ Lever Input = Z(10)
+var_alias CS- Lever Input = Z(11)
+var_alias Come back = Z(12)
+var_alias Version = Z(13)
+
+DISKVARS = A, B, C, D, E, F, G, H, I, J, K, L, M, U, V, Z
+DISKOPTIONS = FULLHEADERS
+DISKFORMAT = 16.3
+DISKCOLUMNS = 1
+Y2KCOMPLIANT
+
+\-------------------------------------------------------------------------
+\State Set 1 - Control Program
+
+S.S.1,
+S1,	\State 1 sets the default variables
+	0.01": SET Z(0) = ^SessionLength, Z(1) = ^Timebins, Z(2) = ^InitialFR;
+	SET Z(3) = ^VRAfter; ARITHMETICMEAN Z(4) = U, 0, 8;
+	SET Z(5) = ^CSduration / 10, Z(6) = ^NoseOption;
+	SET Z(12) = ^Comeback, Z(13) = ^Version / 100;
+
+	\Seal all the arrays
+	SET B(1) = -987.987, C(1) = -987.987, D(1) = -987.987;
+	SET E(1) = -987.987, F(1) = -987.987, G(1) = -987.987;
+	SET H(1) = -987.987, I(1) = -987.987, J(1) = -987.987; 
+	SET K(1) = -987.987, L(1) = -987.987, M(1) = -987.987;
+	SET A(14) = -987.987;
+
+	\LOCK ON the houselight
+	LOCKON ^Houselight;
+
+	\Nosepoke and lever input/output settings
+	IF Z(6) = ^LeftNose [@LEFTOK, @CHECK]
+		@LEFTOK: SET Z(7) = ^RightNose;
+		SET Z(8) = ^LeftExt, Z(9) = ^RightExt;
+		SET Z(10) = ^LeftLever, Z(11) = ^RightLever ---> S2
+		@CHECK: IF Z(6) = ^RightNose [@RIGHTOK, @SET]
+			@RIGHTOK: SET Z(7) = ^LeftNose;
+			SET Z(8) = ^RightExt, Z(9) = ^LeftExt;
+			SET Z(10) = ^RightLever, Z(11) = ^LeftLever ---> S2
+			@SET: SET Y = BOX / 2;
+			~Y := Frac(Y);~;
+			SET Z(6) = Y;
+			IF Z(6) < 0.1 [@EVEN, @ODD]
+				@EVEN: SET Z(6) = ^RightNose, Z(7) = ^LeftNose;
+				SET Z(8) = ^RightExt, Z(9) = ^LeftExt;
+				SET Z(10) = ^RightLever, Z(11) = ^LeftLever ---> S2 
+				@ODD: SET Z(6) = ^LeftNose, Z(7) = ^RightNose;
+				SET Z(8) = ^LeftExt, Z(9) = ^RightExt;
+				SET Z(10) = ^LeftLever, Z(11) = ^RightLever ---> S2
+
+S2,	\State 2 will respond to the start command or a right lever press
+	#START ! #R^PortEntry: SET X(0) = 0; SHOW 1, Session Time, X(0);
+
+	\Set the default latencies
+	SET B(0) = Z(0) * 60, C(0) = Z(0) * 60, D(0) = Z(0) * 60;
+	SET E(0) = Z(0) * 60, F(0) = Z(0) * 60, G(0) = Z(0) * 60;
+
+	\Set the session start time
+	SET STARTHOURS = CURRENTHOURS, STARTMINUTES = CURRENTMINUTES;
+	SET STARTSECONDS = CURRENTSECONDS ---> S3
+
+S3,	\State 3 will show the session clock value during the session
+	1": ADD X(0); SHOW 1, Session Time, X(0);
+	IF X(0) >= Z(0) * 60 [@TRUE, @FALSE]
+		@TRUE: Z^Shutdown;
+
+		\Record the latencies
+		SET A(8) = B(0), A(9) = C(0), A(10) = D(0);
+		SET A(11) = E(0), A(12) = F(0), A(13) = G(0) ---> S4
+
+		@FALSE: --->SX
+
+S4,	\State 4 will stop the session
+	1": ---> STOPABORTFLUSH
+
+\-------------------------------------------------------------------------
+\State Set 2 - Centisecond Clock
+
+S.S.2,
+S1,	\State 1 waits for the start command
+	#START ! #R^PortEntry: SET X(1) = 0 ---> S2
+
+S2,	\State 2 will increment the centisecond clock and the timebin clock
+	\Incorporates the timebin shifter
+
+	0.01": SET X(1) = X(1) + 0.01, X(2) = X(2) + 0.01; 
+	IF X(2) >= (Z(0) * 60)/Z(1) [@TRUE, @FALSE]
+		@TRUE: SET X(2) = 0; ADD T;
+		SET H(T) = 0, I(T) = 0, J(T) = 0;
+		SET K(T) = 0, L(T) = 0, M(T) = 0;
+		SET H(T+1) = -987.987, I(T+1) = -987.987;
+		SET J(T+1) = -987.987, K(T+1) = -987.987;
+		SET L(T+1) = -987.987, M(T+1) = -987.987 ---> SX
+		@FALSE: ---> SX
+
+	#Z^Shutdown: ---> S3
+
+S3,	\State 3 is a holding state
+	#START: ---> SX
+
+\-------------------------------------------------------------------------
+\State Set 3 - CS+ Nosepoke Counter
+
+S.S.3,
+S1,	\State 1 responds to the start command, showing data
+	#START ! #R^PortEntry: SHOW 2, CS+ Nosepokes, A(0);
+	SET X(4) = Z(2) ---> S2
+
+S2,	\State 2 counts the number of CS+ Nosepokes
+	#RZ(6): ADD A(0), X(3), H(T); SET B(N) = X(1);
+	ADD N; SET B(N) = -987.987; SHOW 2, CS+ Nosepokes, A(0);
+	IF X(3) >= X(4) [@REWARD, @NULL]
+		@REWARD: ADD A(2), J(T); SET X(3) = 0;
+		SET D(P) = X(1); ADD P; SET D(P) = -987.987;
+		Z^CSplus ---> S3
+		@NULL: ---> SX
+
+	#Z^Shutdown: ---> S4
+
+S3,	\State 3 counts CS+ Nosepokes while the CS+ lever is extended
+	#RZ(6): ADD A(0), H(T); SET B(N) = X(1);
+	ADD N; SET B(N) = -987.987;
+	SHOW 2, CS+ Nosepokes, A(0) ---> SX
+
+	#Z^EndCSplus: IF A(2) >= Z(3) [@VR, @FR]
+		@VR: RANDD X(4) = U ---> S2
+		@FR: SET X(4) = Z(2) ---> S2
+
+	#Z^Shutdown: ---> S4
+
+S4,	\State 4 is a holding state
+	#START: ---> SX
+
+\-------------------------------------------------------------------------
+\State Set 4 - CS+ Lever Counter
+
+S.S.4,
+S1,	\State 1 responds to the start command, showing data
+	#START ! #R^PortEntry: SHOW 3, CS+ Presentations, A(2) ---> S2
+
+S2,	\State 2 waits for the ^CSplus Z-Pulse
+	#Z^CSplus: ON Z(8); SHOW 3, CS+ Presentations, A(2) ---> S3
+
+	#Z^Shutdown: ---> S4
+
+S3,	\State 3 counts CS+ lever activations
+	#RZ(10): ADD A(4), L(T); SET F(R) = X(1); ADD R;
+	SET F(R) = -987.987 ---> SX
+
+	#Z^EndCSplus: OFF Z(8) ---> S2
+	#Z^Shutdown: ---> S4
+
+S4,	\State 4 is a holding state
+	#START: ---> SX
+
+\-------------------------------------------------------------------------
+\State Set 5 - CS+ Lever Timer
+
+S.S.5,
+S1,	\State 1 responds to the start command, showing data
+	#START ! #R^PortEntry: SET X(7) = Z(5) * 1" ---> S2
+
+S2,	\State 2 waits for the ^CSplus Z-Pulse
+	#Z^CSplus: ---> S3
+
+	#Z^Shutdown: ---> S4
+
+S3,	\State 3 waits to retract the CS+ lever
+	X(7)#T: Z^EndCSplus ---> S2
+
+	#Z^Shutdown: ---> S4
+
+S4,	\State 4 is a holding state
+	#START: ---> SX
+
+\-------------------------------------------------------------------------
+\State Set 6 - CS- Nosepoke Counter
+
+S.S.6,
+S1,	\State 1 responds to the start command, showing data
+	#START ! #R^PortEntry: SHOW 4, CS- Nosepokes, A(1);
+	SET X(6) = Z(2) ---> S2
+
+S2,	\State 2 counts the number of CS- Nosepokes
+	#RZ(7): ADD A(1), X(5), I(T); SET C(O) = X(1);
+	ADD O; SET C(O) = -987.987; SHOW 4, CS- Nosepokes, A(1);
+	IF X(5) >= X(6) [@REWARD, @NULL]
+		@REWARD: ADD A(3), K(T); SET X(5) = 0;
+		SET E(Q) = X(1); ADD Q; SET E(Q) = -987.987;
+		Z^CSminus ---> S3
+		@NULL: ---> SX
+
+	#Z^Shutdown: ---> S4
+
+S3,	\State 3 counts CS- Nosepokes while the CS- lever is extended
+	#RZ(7): ADD A(1), I(T); SET C(O) = X(1);
+	ADD O; SET C(O) = -987.987;
+	SHOW 4, CS- Nosepokes, A(1) ---> SX
+
+	#Z^EndCSminus: IF A(3) >= Z(3) [@VR, @FR]
+		@VR: RANDD X(6) = V ---> S2
+		@FR: SET X(6) = Z(2) ---> S2
+
+	#Z^Shutdown: ---> S4
+
+S4,	\State 4 is a holding state
+	#START: ---> SX
+
+\-------------------------------------------------------------------------
+\State Set 7 - CS- Lever Counter
+
+S.S.7,
+S1,	\State 1 responds to the start command, showing data
+	#START ! #R^PortEntry: SHOW 5, CS- Presentations, A(3) ---> S2
+
+S2,	\State 2 waits for the ^CSplus Z-Pulse
+	#Z^CSminus: ON Z(9); SHOW 5, CS- Presentations, A(3) ---> S3
+
+	#Z^Shutdown: ---> S4
+
+S3,	\State 3 counts CS- lever activations
+	#RZ(11): ADD A(5), M(T); SET G(S) = X(1); ADD S;
+	SET G(S) = -987.987 ---> SX
+
+	#Z^EndCSminus: OFF Z(9) ---> S2
+	#Z^Shutdown: ---> S4
+
+S4,	\State 4 is a holding state
+	#START: ---> SX
+
+\-------------------------------------------------------------------------
+\State Set 8 - CS- Lever Timer
+
+S.S.8,
+S1,	\State 1 responds to the start command, showing data
+	#START ! #R^PortEntry: ---> S2
+
+S2,	\State 2 waits for the ^CSminus Z-Pulse
+	#Z^CSminus: ---> S3
+
+	#Z^Shutdown: ---> S4
+
+S3,	\State 3 waits to retract the CS- lever
+	X(7)#T: Z^EndCSminus ---> S2
+
+	#Z^Shutdown: ---> S4
+
+S4,	\State 4 is a holding state
+	#START: ---> SX
+
+\-------------------------------------------------------------------------
+\State Set 9 - Pre-session screen updater and housekeeping
+
+S.S.9,
+S1,	\State 1 shows key session control variables on the screen
+	1": SHOW 1, Session Length, Z(0), 2, Number of Timebins, Z(1);
+	SHOW 3, CS Duration (s), Z(5), 4, CS+ Nosepoke (5L 6R), Z(6);
+	SHOW 5, CS- Nosepoke (5L 6R), Z(7);
+
+	IF S.S.1 > 2 [@MISSED, @STAY]
+		@MISSED: SET W = SECSTODAY, Y = W + Z(0) * 60 - Z(12) * 60;
+		SET W = Y / 3600, Y = W;
+		~W := Trunc(W);~; ~Y := Frac(Y);~;
+		SET Y = Y * 60; ~Y := Round(Y);~;
+		IF Y >=60 [@ADD, @OK]
+			@ADD: ADD W; SHOW 6, Come Back At, W; SET Y = Z(0) / 2 * 1' ---> S2
+			@OK: SET W = W + Y / 100; SHOW 6, Come Back At, W; SET Y = Z(0) / 2 * 1' ---> S2
+		@STAY: ---> SX
+
+	#START ! #R^PortEntry: SET W = SECSTODAY, Y = W + Z(0) * 60 - Z(12) * 60;
+		SET W = Y / 3600, Y = W;
+		~W := Trunc(W);~; ~Y := Frac(Y);~;
+		SET Y = Y * 60; ~Y := Round(Y);~;
+		IF Y >=60 [@ADD, @OK]
+			@ADD: ADD W; SHOW 6, Come Back At, W; SET Y = Z(0) / 2 * 1' ---> S2
+			@OK: SET W = W + Y / 100; SHOW 6, Come Back At, W; SET Y = Z(0) / 2 * 1' ---> S2
+
+S2,	\State 2 waits to clear the come back time
+	Y#T: CLEAR 6, 6 ---> S3
+
+S3,	\State 3 is a holding state
+	#sTART: ---> SX
+	

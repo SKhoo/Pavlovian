@@ -1,0 +1,324 @@
+\-------------------------------------------------------------------------
+\ C3 General Exploratory Behaviour
+\ Version: 1.05
+\ Based on C0 Habituation
+\-------------------------------------------------------------------------
+
+\CONSTANTS
+\SESSION CONTROL VARIABLES
+^Delay = 2	\Delay period in minutes
+^Length = 45 	\Session Length in minutes
+^Timebins = 9 	\Number of timebins
+^Version = 105	\Version
+
+\INPUTS
+^Discrete = 3 	\Discrete Port Entries
+^Continuous = 4 \Continuous Port Entries (duration)
+^LeftNosepoke = 6
+^RightNosepoke = 7
+
+\OUTPUTS
+^Houselight = 5 
+
+\Z-PULSES
+^Session = 1
+^Shutdown = 9
+
+\VARIABLES
+\VARIABLES - DATA - Session Totals
+DIM A = 9
+\A(0) = Total Port Entries
+\A(1) = Total Port Entry Duration
+\A(2) = Delay Port Entries
+\A(3) = Delay Port Entry Duration
+\A(4) = Total Left Nosepokes
+\A(5) = Total Right Nosepokes
+\A(6) = Delay Left Nosepokes
+\A(7) = Delay Right Nosepokes
+\A(8) = Total Nosepokes
+VAR_ALIAS Weight = A(9)
+
+\VARIABLES - DATA - Timecourse Data
+DIM B = 10000		\Timestamp of every port entry,	subscript F
+DIM C = 10000		\Duration of every port entry,	subscript F
+DIM G = 10000		\Timestamp of every left nosepoke, subscript K
+DIM H = 10000		\Timestamp of every right nosepoke, subscript L
+
+\VARIABLES - DATA - Timebins
+DIM D = 1000		\Port entries,		subscript T
+DIM E = 1000		\Port entry duration,	subscript T
+DIM I = 1000		\Left nosepokes,	subscript T
+DIM J = 1000		\Right nosepokes,	subscript T
+
+
+\VARIABLES - CONTROL - WORKING VARIABLES
+DIM X = 2
+\X(0) = Session clock
+\X(1) = Centisecond clock
+\X(2) = Timebin clock
+
+\VARIABLES - CONTROL - SESSION PARAMETERS
+DIM Z = 3
+VAR_ALIAS Delay (min) = Z(1)
+VAR_ALIAS Session Length (min) = Z(0)
+VAR_ALIAS Timebins = Z(2)
+VAR_ALIAS Version = Z(3)
+
+DISKVARS = A, B, C, D, E, G, H, I, J, Z
+DISKOPTIONS = FULLHEADERS
+DISKFORMAT = 16.3
+DISKCOLUMNS = 1
+Y2KCOMPLIANT
+
+\-------------------------------------------------------------------------
+\State Set 1 - Control Program
+
+S.S.1,
+S1,	\State 1 sets the default variables
+	0.01": SET Z(0) = ^Length, Z(1) = ^Delay;
+	SET Z(2) = ^Timebins, Z(3) = ^Version / 100;
+
+	\Seal all the arrays
+	SET B(1) = -987.987, C(1) = -987.987;
+	SET D(1) = -987.987, E(1) = -987.987;
+	SET G(1) = -987.987, H(1) = -987.987;
+	SET I(1) = -987.987, J(1) = -987.987;
+	SET A(9) = -987.987 ---> S2
+
+S2,	\State 2 will respond to the start command by switching on the houselight
+	\and showing the session clock
+
+	#START : SET X(0) = 0 - Z(1) * 60; SHOW 1, Delay Time, X(0) ---> S3
+
+S3,	\State 3 will show session clock value during the delay
+
+	1": ADD X(0); IF X(0) >= 0 [@TRUE, @FALSE]
+		@TRUE: Z^Session; ON^Houselight;
+		SHOW 1, Session Time, X(0) ---> S4
+		@FALSE: SHOW 1, Delay Time, X(0) ---> SX
+
+S4,	\State 4 will show the session clock value during the session
+	1": ADD X(0); SHOW 1, Session Time, X(0);
+	IF X(0) >= Z(0) * 60 [@TRUE, @FALSE]
+		@TRUE: Z^Shutdown; OFF^Houselight;
+		SET A(8) = A(4) + A(5) ---> S5
+		@FALSE: --->SX
+
+S5,	\State 5 will stop the session
+	1": ---> STOPABORTFLUSH
+
+\-------------------------------------------------------------------------
+\State Set 2 - Centisecond Clock
+
+S.S.2,
+S1,	\State 1 waits for the start command
+	#START: SET X(1) = 0 - Z(1) * 60 ---> S2
+
+S2,	\State 2 is the centisecond clock during the delay
+	0.01": SET X(1) = X(1) + 0.01;
+	IF X(1) >= 0 [@TRUE, @FALSE]
+		@TRUE: ---> S3
+		@FALSE: ---> SX
+	
+	#Z^Session: ---> S3
+
+S3,	\State 3 will increment the centisecond clock and the timebin clock
+	\Incorporates the timebin shifter
+
+	0.01": SET X(1) = X(1) + 0.01, X(2) = X(2) + 0.01; 
+	IF X(2) >= (Z(0) * 60)/Z(2) [@true, @false]
+		@true: SET X(2) = 0; ADD T; 
+		SET D(T) = 0, E(T) = 0;
+		SET I(T) = 0, J(T) = 0;
+		SET D(T+1) = -987.987, E(T+1) = -987.987;
+		SET I(T+1) = -987.987, J(T+1) = -987.987 ---> SX
+		@false: ---> SX
+
+	#Z^Shutdown: ---> S4
+
+S4, 	\Holding state
+
+	#START: ---> SX
+
+
+\-------------------------------------------------------------------------
+\State Set 3 - Port Entry Counter
+
+S.S.3,  
+S1,	\State 1 responds to the start command, showing data
+	#START: SHOW 2, Port Entries, A(0), 3, Port Entry Duration, A(1);
+	SHOW 4, Delay Port Entries, A(2), 5, Delay PE Duration, A(3) ---> S2
+
+S2,	\State 2 will count the number of port entries during the delay
+	#R^Discrete: ADD A(2); SET B(F) = X(1), C(F) = 0;
+	SET B(F+1) = -987.987, C(F+1) = -987.987;
+		SHOW 4, Delay Port Entries, A(2) ---> S3
+
+	#Z^Session: ---> S4
+
+S3,	\State 3 measures port entry duration
+	#R^Continuous: SET A(3) = A(3) + 0.01, C(F) = C(F) + 0.01;
+		SHOW 5, Delay PE Duration, A(3) ---> SX
+
+	0.01": IF C(F) < 0.01 [@TRUE, @FALSE]
+		@TRUE: SET A(3) = A(3) + 0.001, C(F) = C(F) + 0.001;
+		SHOW 5, Delay PE Duration, A(3); ADD F;
+		IF S.S.1 >= 4 [@SESSION, @DELAY]
+			@SESSION: ---> S4
+			@DELAY: ---> S2
+		@FALSE: ADD F; IF S.S.1 >= 4 [@SESSION, @DELAY]
+			@SESSION: ---> S4
+			@DELAY: ---> S2
+
+	#Z^Session: IF C(F) < 0.01 [@TRUE, @FALSE]
+		@TRUE: SET A(3) = A(3) + 0.001, C(F) = C(F) + 0.001;
+		SHOW 5, Delay PE Duration, A(3); ADD F ---> S4
+		@FALSE: ADD F ---> S4
+
+S4, 	\State 4 will count the number of port entries
+
+	#R^Discrete: ADD A(0), D(T); SET B(F) = X(1), C(F) = 0; 
+	SET B(F+1) = -987.987, C(F+1) = -987.987;
+		SHOW 2, Port Entries, A(0) ---> S5
+
+	#Z^Shutdown: ---> S6
+
+S5, 	\State 3 will measure port entry duration
+
+	#R^Continuous: SET A(1) = A(1) + 0.01, C(F) = C(F) + 0.01, E(T) = E(T) + 0.01;
+	SHOW 3, Port Entry Duration, A(1)---> SX
+
+	0.01": IF C(F) < 0.01 [@true, @false]
+		@true: SET A(1) = A(1) + 0.001, C(F) = C(F) + 0.001, E(T) = E(T) + 0.001;
+		SHOW 3, Port Entry Duration, A(1); ADD F ---> S4
+		@false: ADD F ---> S4
+
+	#Z^Shutdown: IF C(F) < 0.01 [@true, @false]
+		@true: SET A(1) = A(1) + 0.001, C(F) = C(F) + 0.001, E(T) = E(T) + 0.001;
+		SHOW 3, Port Entry Duration, A(1) ---> S6
+		@false: ---> S6
+
+S6,	\State 6 is a holding state 
+	#START: ---> SX
+
+\-------------------------------------------------------------------------
+\State Set 4 - Left Nosepoke Counter
+
+S.S.4,
+S1,	\State 1 responds to the start command, showing data
+	#START: SHOW 7, Left Nosepokes, A(4);
+	SHOW 9, Delay Left Nosepokes, A(6) ---> S2
+
+S2,	\State 2 counts left nosepokes during the delay
+	#R^LeftNosepoke: ADD A(6); SET G(K) = X(1); ADD K;
+	SET G(K) = -987.987; SHOW 9, Delay Left Nosepokes, A(6) ---> SX
+
+	#Z^Session: ---> S3
+	#Z^Shutdown: ---> S4
+
+S3,	\State 3 counts left nosepokes during the session
+	#R^LeftNosepoke: ADD A(4), I(T); SET G(K) = X(1); ADD K;
+	SET G(K) = -987.987; SHOW 7, Left Nosepokes, A(4) ---> SX
+
+	#Z^Shutdown: ---> S4
+
+S4,	\State 4 is a holding state
+	#START: ---> SX
+
+\-------------------------------------------------------------------------
+\State Set 5 - RightNosepoke Counter
+
+S.S.5,
+S1,	\State 1 responds to the start command, showing data
+	#START: SHOW 8, Right Nosepokes, A(5);
+	SHOW 10, Delay Right Nosepokes, A(7) ---> S2
+
+S2,	\State 2 counts left nosepokes during the delay
+	#R^RightNosepoke: ADD A(7); SET H(L) = X(1); ADD L;
+	SET H(L) = -987.987; SHOW 10, Delay Right Nosepokes, A(7) ---> SX
+
+	#Z^Session: ---> S3
+	#Z^Shutdown: ---> S4
+
+S3,	\State 3 counts left nosepokes during the session
+	#R^RightNosepoke: ADD A(5), J(T); SET H(L) = X(1); ADD L;
+	SET H(L) = -987.987; SHOW 8, Right Nosepokes, A(5) ---> SX
+
+	#Z^Shutdown: ---> S4
+
+S4,	\State 4 is a holding state
+	#START: ---> SX
+
+\-------------------------------------------------------------------------
+\State Set 6 - Pre-Session Screen Updater
+
+S.S.6,
+S1,	\State 1 updates the screen before the session begins
+	1": SHOW 1, Session Length (min), Z(0), 2, Timebins, Z(2);
+	SHOW 3, Pre-Session Delay, Z(1);
+	IF S.S.1 > 2 [@SKIPPED, @HOLD]
+		@SKIPPED: ---> S2
+		@HOLD: ---> SX
+
+	#START: ---> S2
+
+S2,	\State 2 is a holding state
+	#START: ---> SX
+
+\-------------------------------------------------------------------------
+\RELEASE NOTES: Version 1.0
+\-------------------------------------------------------------------------
+\
+\ Habituation
+\
+\ This program will run a very basic session that switches on the houselight
+\ and records port entries and their durations.
+\
+\ The default parameters are a 20 min session with 4 timebins (i.e. 5 min each).
+\
+\ The MIT License below gives you permission to alter or improve this program
+\ allowing you to adjust the program or fix any bugs you find. However, it would be
+\ appreciated if bugs could be reported so that they can be fixed in the master tree
+\ on Github. For contact details, please see:
+\ http://orcid.org/0000-0002-0972-3788
+\ or visit:
+\ https://github.com/SKhoo
+\
+\-------------------------------------------------------------------------
+\CHANGELOG: Version 1.05
+\-------------------------------------------------------------------------
+\
+\ Version 1.05
+\ Adapted to C3 General Exploratory Behaviour
+\ Added left and right nosepokes
+\ Added S.S.4 and S.S.5, moving the previous S.S.4 to S.S.6.
+\ Nosepokes are counted, but no option available to measured duration.
+\
+\ Version 1.01
+\ Added Delay:
+\ Two minute delay before houselight turns on.
+\ Port entries during this time are counted, but not in the regular total.
+\
+\-------------------------------------------------------------------------
+\ MIT License
+\
+\ Copyright (c) 2017 Shaun Khoo & Ghislaine Deyab
+\
+\ Permission is hereby granted, free of charge, to any person obtaining a copy
+\ of this software and associated documentation files (the "Software"), to deal
+\ in the Software without restriction, including without limitation the rights
+\ to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+\ copies of the Software, and to permit persons to whom the Software is
+\ furnished to do so, subject to the following conditions:
+\
+\ The above copyright notice and this permission notice shall be included in all
+\ copies or substantial portions of the Software.
+\
+\ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+\ IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+\ FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+\ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+\ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+\ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+\ SOFTWARE.
+\-------------------------------------------------------------------------

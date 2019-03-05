@@ -1,0 +1,238 @@
+\-------------------------------------------------------------------------
+\ C6 Nosepoke Habituation
+\ Version: 1.0
+\ Created by Shaun Khoo (22 October 2018)
+\ Adapted from C0 Habituation by Shaun Khoo and Ghislaine Deyab v1.01.
+\ >('.')<
+\ http://orcid.org/0000-0002-0972-3788
+\-------------------------------------------------------------------------
+
+\CONSTANTS
+\SESSION CONTROL VARIABLES
+^Length = 10 	\Session Length in minutes
+^Timebins = 10 	\Number of timebins
+^NoseOption = 0	\Set CS+ Nosepoke Based on BOX = 0, Left Nosepoke = 1, Right Nosepoke = 2
+^Version = 100	\Version
+
+\INPUTS
+^Discrete = 3 	\Discrete Port Entries - Used to start program
+\^Continuous = 4 \Continuous Port Entries (duration)
+^LeftLever = 1
+^RightLever = 2
+^LeftNose = 5
+^RightNose = 6
+
+\OUTPUTS
+^LeftOut = 1
+^RightOut = 2
+^Houselight = 5 
+
+\Z-PULSES
+^Session = 1
+^Shutdown = 9
+
+\VARIABLES
+\VARIABLES - DATA - Session Totals
+DIM A = 2
+\A(0) = CS+ Nosepokes
+\A(1) = CS- Nosepokes
+VAR_ALIAS Weight = A(2)
+
+\VARIABLES - DATA - Timecourse Data
+DIM B = 10000		\Timestamp of every CS+ nosepoke,	subscript F
+DIM C = 10000		\Timestamp of every CS- nosepoke,	subscript G
+
+\VARIABLES - DATA - Timebins
+DIM D = 1000		\CS+ nosepokes,		subscript T
+DIM E = 1000		\CS- nosepokes,		subscript T
+
+\VARIABLES - CONTROL - WORKING VARIABLES
+DIM X = 2
+\X(0) = Session clock
+\X(1) = Centisecond clock
+\X(2) = Timebin clock
+
+\VARIABLES - CONTROL - SESSION PARAMETERS
+DIM Z = 4
+VAR_ALIAS Session Length (min) = Z(0)
+VAR_ALIAS Timebins = Z(1)
+VAR_ALIAS CS+ Nosepoke = Z(2)
+VAR_ALIAS CS- Nosepoke = Z(3)
+VAR_ALIAS Version = Z(4)
+
+DISKVARS = A, B, C, D, E, Z
+DISKOPTIONS = FULLHEADERS
+DISKFORMAT = 16.3
+DISKCOLUMNS = 1
+Y2KCOMPLIANT
+
+\-------------------------------------------------------------------------
+\State Set 1 - Control Program
+
+S.S.1,
+S1,	\State 1 sets the default variables
+	0.01": SET Z(0) = ^Length;
+	SET Z(1) = ^Timebins, Z(2) = ^NoseOption;
+	SET Z(4) = ^Version / 100;
+
+	\Seal all the arrays
+	SET B(1) = -987.987, C(1) = -987.987;
+	SET D(1) = -987.987, E(1) = -987.987;
+	SET A(2) = -987.987;
+
+	\LOCK ON the houselight
+	LOCKON ^Houselight;
+
+	\Set lever if ^NoseOption is not 1 or 2
+	IF Z(2) = ^LeftNose [@LEFTOK, @CHECK]
+		@LEFTOK: SET Z(3) = ^RightNose---> S2
+		@CHECK: IF Z(2) = ^RightNose [@RIGHTOK, @SET]
+			@RIGHTOK: SET Z(3) = ^LeftNose---> S2
+			@SET: SET Y = BOX / 2;
+			~Y := Frac(Y);~;
+			SET Z(2) = Y;
+			IF Z(2) < 0.1 [@EVEN, @ODD]
+				@EVEN: SET Z(2) = ^RightNose, Z(3) = ^LeftNose ---> S2
+				@ODD: SET Z(2) = ^LeftNose, Z(3) = ^RightNose ---> S2
+
+S2,	\State 2 will respond to the start command or a right lever press
+
+	#START ! #R^Discrete: SET X(0) = 0; SHOW 1, Session Time, X(0);
+	SET STARTHOURS = CURRENTHOURS, STARTMINUTES = CURRENTMINUTES;
+	SET STARTSECONDS = CURRENTSECONDS;
+	SET B(0) = Z(0) * 60, C(0) = Z(0) * 60 ---> S3
+
+S3,	\State 3 will show the session clock value during the session
+	1": ADD X(0); SHOW 1, Session Time, X(0);
+	IF X(0) >= Z(0) * 60 [@TRUE, @FALSE]
+		@TRUE: Z^Shutdown ---> S4
+		@FALSE: --->SX
+
+S4,	\State 4 will stop the session
+	1": ---> STOPABORTFLUSH
+
+\-------------------------------------------------------------------------
+\State Set 2 - Centisecond Clock
+
+S.S.2,
+S1,	\State 1 waits for the start command
+	#START ! #R^Discrete: SET X(1) = 0 ---> S2
+
+S2,	\State 2 will increment the centisecond clock and the timebin clock
+	\Incorporates the timebin shifter
+
+	0.01": SET X(1) = X(1) + 0.01, X(2) = X(2) + 0.01; 
+	IF X(2) >= (Z(0) * 60)/Z(1) [@true, @false]
+		@TRUE: SET X(2) = 0; ADD T; SET D(T) = 0, E(T) = 0;
+		SET D(T+1) = -987.987, E(T+1) = -987.987 ---> SX
+		@FALSE: ---> SX
+
+	#Z^Shutdown: ---> S3
+
+S3, 	\Holding state
+
+	#START: ---> SX
+
+\-------------------------------------------------------------------------
+\State Set 3 - CS+ Nosepoke Counter
+
+S.S.3,  
+S1,	\State 1 responds to the start command, showing data
+	#START ! #R^Discrete: SHOW 2, CS+ Nosepokes, A(0) ---> S2
+
+S2,	\State 2 counts the number of CS+ Nosepokes
+	#RZ(2): ADD A(0), D(T); SET B(F) = X(1);
+	ADD F; SET B(F) = -987.987;
+	SHOW 2, CS+ Nosepokes, A(0) ---> SX
+
+	#Z^Shutdown: ---> S3
+
+S3, 	\State 3 is a holding state
+	#START: ---> SX
+
+\-------------------------------------------------------------------------
+\State Set 4 - CS- Nosepoke Counter
+
+S.S.4,  
+S1,	\State 1 responds to the start command, showing data
+	#START ! #R^Discrete: SHOW 3, CS- Nosepokes, A(1) ---> S2
+
+S2,	\State 3 counts the number of CS- Nosepokes
+	#RZ(3): ADD A(1), E(T); SET C(G) = X(1);
+	ADD G; SET C(G) = -987.987;
+	SHOW 3, CS- Nosepokes, A(1) ---> SX
+
+	#Z^Shutdown: ---> S4
+
+S3, 	\State 4 is a holding state
+	#START: ---> SX
+
+
+\-------------------------------------------------------------------------
+\State Set 5 - Pre-Session Screen Updater
+
+S.S.5,
+S1,	\State 1 updates the screen before the session begins
+	1": SHOW 1, Session Length (min), Z(0), 2, Timebins, Z(1);
+	SHOW 3, CS+ Nosepoke (5L 6R), Z(2);
+	IF S.S.1 > 2 [@SKIPPED, @HOLD]
+		@SKIPPED: ---> S2
+		@HOLD: ---> SX
+
+	#START ! #R^Discrete: ---> S2
+
+S2,	\State 2 is a holding state
+	#START: ---> SX
+
+\-------------------------------------------------------------------------
+\RELEASE NOTES: Version 1.0
+\-------------------------------------------------------------------------
+\
+\ Nosepoke Habituation
+\
+\ This program will run a very basic session that switches on the houselight
+\ and records nosepokes and their durations.
+\
+\ It is intended to provide a basic short habituation session for autoshaping
+\ experiments before tests of conditioned reinforcement. Thus, the left and
+\ right nosepokes are automatically designated as 'CS+' and 'CS-' using the
+\ same algorithm as used in the C5 Autoshaping Double Lever program.
+\
+\ Unlike other Chaudhri Lab programs, there is no 'delay' between issuing the
+\ #START command and the session starting.
+\
+\ Experimenters also have the option of initiating the session by activating
+\ the right lever as they place the rat in the chamber.
+\
+\ The MIT License below gives you permission to alter or improve this program
+\ allowing you to adjust the program or fix any bugs you find. However, it would be
+\ appreciated if bugs could be reported so that they can be fixed in the master tree
+\ on Github. For contact details, please see:
+\ http://orcid.org/0000-0002-0972-3788
+\ or visit:
+\ https://github.com/SKhoo
+\
+\
+\-------------------------------------------------------------------------
+\ MIT License
+\
+\ Copyright (c) 2018 Shaun Khoo
+\
+\ Permission is hereby granted, free of charge, to any person obtaining a copy
+\ of this software and associated documentation files (the "Software"), to deal
+\ in the Software without restriction, including without limitation the rights
+\ to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+\ copies of the Software, and to permit persons to whom the Software is
+\ furnished to do so, subject to the following conditions:
+\
+\ The above copyright notice and this permission notice shall be included in all
+\ copies or substantial portions of the Software.
+\
+\ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+\ IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+\ FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+\ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+\ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+\ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+\ SOFTWARE.
+\-------------------------------------------------------------------------

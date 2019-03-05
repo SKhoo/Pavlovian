@@ -1,0 +1,360 @@
+\-------------------------------------------------------------------------
+\ C7b Conditioned Reinforcement Single Lever
+\ Version: 1.00
+\ Created by Shaun Khoo (22 February 2019) for Chaudhri Lab boxes
+\ >('.')<
+\ http://orcid.org/0000-0002-0972-3788
+\-------------------------------------------------------------------------
+
+\CONSTANTS
+\SESSION CONTROL VARIABLES
+^SessionLength = 60		\Session length in minutes
+^Timebins = 12			\Number of timebins
+^InitialFR = 1			\Initial fixed ratio
+^VRAfter = 3			\Switch to a VR schedule after this many Active presentations
+^CSduration = 25		\CS duration in deciseconds (will be divided by 10)
+^NoseOption = 0			\Set Active Nosepoke Based on BOX = 0, Left Nosepoke = 5, Right Nosepoke = 6
+^Comeback = 5			\Display a time (in minutes) to come back before the session finishes
+^Version = 100			
+
+\INPUTS
+^Lever = 1			\Left Lever
+^PortEntry = 3			\PortEntry used as a start button
+^LeftNose = 5
+^RightNose = 6
+
+\OUTPUTS
+^LeverExt = 1        		\Extend the left lever
+^LeftCueLight = 3        	\Not used in this program
+^RightCueLight = 4        	\Not used in this program
+^Houselight = 5
+^Clicker = 6			\Not used in this program
+^Whitenoise = 7			\Not used in this program
+^Pump = 8			\Not used in this program
+
+\Z-PULSES
+^PresentLever = 1
+^RetractLever = 2
+^Shutdown = 5
+
+\VARIABLES
+\VARIABLES - DATA - Session Totals
+DIM A = 10
+\Active Nosepokes = A(0)
+\Inactive Nosepokes = A(1)
+\Lever Presentations = A(2)
+\Lever Activations = A(3)
+\Active Timeout Nosepokes = A(4)
+\Inactive Timeout Nosepokes = A(5)
+\Latency to first Active Nosepoke = A(6)
+\Latency to first Inactive Nosepoke = A(7)
+\Latency to first Lever Presentation = A(8)
+\Latency to first Lever Activation = A(9)
+var_alias Weight = A(10)
+
+\VARIABLES - DATA - Timecourse Arrays
+DIM B = 50000		\Active Nosepokes,			subscript J
+DIM C = 50000		\Inactive Nosepokes,			subscript K
+DIM D = 50000		\Lever Presentations,			subscript L
+DIM E = 50000		\Lever Activations,			subscript M
+
+\VARIABLES - DATA - Timecourse Arrays
+DIM F = 5000		\Active Nosepokes,			subscript T
+DIM G = 5000		\Inactive Nosepokes,			subscript T
+DIM H = 5000		\Lever Presentations,			subscript T
+DIM I = 5000		\Lever Activations,			subscript T
+
+\VARIABLES - CONTROL - WORKING VARIABLES
+DIM X = 5
+\X(0) = Session Clock (seconds)
+\X(1) = Centisecond Clock
+\X(2) = Timebin Clock
+\X(3) = Re-zeroing Active response counter
+\X(4) = Responses required for next Active
+\X(5) = CS Duration
+
+\VARIABLES - CONTROL - VARIABLE RATIO
+\Active and Inactive run on separate lists because they will be using the
+\RANDD function and they should be independent of each other.
+LIST U = 1, 1, 1, 2, 2, 2, 3, 3, 3	\List for Active
+
+\VARIABLES - CONTROL - SESSION PARAMETERS
+DIM Z = 9
+var_alias Session Length (min) = Z(0)
+var_alias Number of Timebins = Z(1)
+var_alias Initial Fixed Ratio = Z(2)
+var_alias Variable Ratio After = Z(3)
+var_alias Variable Ratio = Z(4)
+var_alias CS Duration (s) = Z(5)
+var_alias Active Nosepoke = Z(6)
+var_alias Inactive Nosepoke = Z(7)
+var_alias Come back = Z(8)
+var_alias Version = Z(9)
+
+DISKVARS = A, B, C, D, E, F, G, H, I, U, Z
+DISKOPTIONS = FULLHEADERS
+DISKFORMAT = 16.3
+DISKCOLUMNS = 1
+Y2KCOMPLIANT
+
+\-------------------------------------------------------------------------
+\State Set 1 - Control Program
+
+S.S.1,
+S1,	\State 1 sets the default variables
+	0.01": SET Z(0) = ^SessionLength, Z(1) = ^Timebins, Z(2) = ^InitialFR;
+	SET Z(3) = ^VRAfter; ARITHMETICMEAN Z(4) = U, 0, 8;
+	SET Z(5) = ^CSduration / 10, Z(6) = ^NoseOption;
+	SET Z(8) = ^Comeback, Z(9) = ^Version / 100;
+
+	\Seal all the arrays
+	SET B(1) = -987.987, C(1) = -987.987;
+	SET D(1) = -987.987, E(1) = -987.987;
+	SET F(1) = -987.987, G(1) = -987.987;
+	SET H(1) = -987.987, I(1) = -987.987;
+	SET A(10) = -987.987;
+
+	\LOCK ON the houselight
+	LOCKON ^Houselight;
+
+	\Nosepoke and lever input/output settings
+	IF Z(6) = ^LeftNose [@LEFTOK, @CHECK]
+		@LEFTOK: SET Z(7) = ^RightNose ---> S2
+		@CHECK: IF Z(6) = ^RightNose [@RIGHTOK, @SET]
+			@RIGHTOK: SET Z(7) = ^LeftNose ---> S2
+			@SET: SET Y = BOX / 2;
+			~Y := Frac(Y);~;
+			SET Z(6) = Y;
+			IF Z(6) < 0.1 [@EVEN, @ODD]
+				@EVEN: SET Z(6) = ^RightNose, Z(7) = ^LeftNose ---> S2 
+				@ODD: SET Z(6) = ^LeftNose, Z(7) = ^RightNose ---> S2
+
+S2,	\State 2 will respond to the start command or a right lever press
+	#START ! #R^PortEntry: SET X(0) = 0; SHOW 1, Session Time, X(0);
+
+	\Set the default latencies
+	SET B(0) = Z(0) * 60, C(0) = Z(0) * 60;
+	SET D(0) = Z(0) * 60, E(0) = Z(0) * 60;
+
+	\Set the session start time
+	SET STARTHOURS = CURRENTHOURS, STARTMINUTES = CURRENTMINUTES;
+	SET STARTSECONDS = CURRENTSECONDS;
+	IF Z(6) = Z(7) [@DOUBLEACTIVE, @OK]
+		@DOUBLEACTIVE: SHOW 1, ERROR!, Z(6), 2, Active nosepoke, Z(6);
+		SHOW 3, is the same as, Z(7), 4, Inactive nosepoke, Z(7);
+		SHOW 5, Error!, Z(6) ---> STOPKILL
+		@OK: ---> S3
+
+S3,	\State 3 will show the session clock value during the session
+	1": ADD X(0); SHOW 1, Session Time, X(0);
+	IF X(0) >= Z(0) * 60 [@TRUE, @FALSE]
+		@TRUE: Z^Shutdown;
+
+		\Record the latencies
+		SET A(6) = B(0), A(7) = C(0);
+		SET A(8) = D(0), A(9) = E(0) ---> S4
+
+		@FALSE: --->SX
+
+S4,	\State 4 will stop the session
+	1": ---> STOPABORTFLUSH
+
+\-------------------------------------------------------------------------
+\State Set 2 - Centisecond Clock
+
+S.S.2,
+S1,	\State 1 waits for the start command
+	#START ! #R^PortEntry: SET X(1) = 0 ---> S2
+
+S2,	\State 2 will increment the centisecond clock and the timebin clock
+	\Incorporates the timebin shifter
+
+	0.01": SET X(1) = X(1) + 0.01, X(2) = X(2) + 0.01; 
+	IF X(2) >= (Z(0) * 60)/Z(1) [@TRUE, @FALSE]
+		@TRUE: SET X(2) = 0; ADD T;
+		SET F(T) = 0, G(T) = 0;
+		SET H(T) = 0, I(T) = 0;
+		SET F(T+1) = -987.987, G(T+1) = -987.987;
+		SET H(T+1) = -987.987, I(T+1) = -987.987---> SX
+		@FALSE: ---> SX
+
+	#Z^Shutdown: ---> S3
+
+S3,	\State 3 is a holding state
+	#START: ---> SX
+
+\-------------------------------------------------------------------------
+\State Set 3 - Active Nosepoke Counter
+
+S.S.3,
+S1,	\State 1 responds to the start command, showing data
+	#START ! #R^PortEntry: SHOW 2, Active Nosepokes, A(0);
+	SET X(4) = Z(2) ---> S2
+
+S2,	\State 2 counts the number of Active Nosepokes
+	#RZ(6): ADD A(0), X(3), F(T); SET B(J) = X(1);
+	ADD J; SET B(J) = -987.987; SHOW 2, Active Nosepokes, A(0);
+	IF X(3) >= X(4) [@REWARD, @NULL]
+		@REWARD: ADD A(2), H(T); SET X(3) = 0;
+		SET D(L) = X(1); ADD L; SET D(L) = -987.987;
+		Z^PresentLever ---> S3
+		@NULL: ---> SX
+
+	#Z^Shutdown: ---> S4
+
+S3,	\State 3 counts Active Nosepokes while the Active lever is extended
+	#RZ(6): ADD A(0), A(4), F(T); SET B(J) = X(1);
+	ADD J; SET B(J) = -987.987;
+	SHOW 2, Active Nosepokes, A(0) ---> SX
+
+	#Z^RetractLever: IF A(2) >= Z(3) [@VR, @FR]
+		@VR: RANDD X(4) = U ---> S2
+		@FR: SET X(4) = Z(2) ---> S2
+
+	#Z^Shutdown: ---> S4
+
+S4,	\State 4 is a holding state
+	#START: ---> SX
+
+\-------------------------------------------------------------------------
+\State Set 4 - Lever Counter
+
+S.S.4,
+S1,	\State 1 responds to the start command, showing data
+	#START ! #R^PortEntry: SHOW 4, Lever Presentations, A(2);
+	SHOW 5, Lever Activations, A(3) ---> S2
+
+S2,	\State 2 waits for the ^PresentLever Z-Pulse
+	#Z^PresentLever: ON ^LeverExt; SHOW 4, Lever Presentations, A(2) ---> S3
+
+	#Z^Shutdown: ---> S4
+
+S3,	\State 3 counts Active lever activations
+	#R^Lever: ADD A(3), I(T); SET E(M) = X(1); ADD M;
+	SET E(M) = -987.987; SHOW 5, Lever Activations, A(3) ---> SX
+
+	#Z^RetractLever: ---> S2
+	#Z^Shutdown: OFF ^LeverExt ---> S4
+
+S4,	\State 4 is a holding state
+	#START: ---> SX
+
+\-------------------------------------------------------------------------
+\State Set 5 - Lever Timer
+
+S.S.5,
+S1,	\State 1 responds to the start command, showing data
+	#START ! #R^PortEntry: SET X(5) = Z(5) * 1" ---> S2
+
+S2,	\State 2 waits for the ^PresentLever Z-Pulse
+	#Z^PresentLever: ---> S3
+
+	#Z^Shutdown: ---> S4
+
+S3,	\State 3 waits to retract the Active lever
+	X(5)#T: OFF ^LeverExt; Z^RetractLever ---> S2
+
+	#Z^Shutdown: ---> S4
+
+S4,	\State 4 is a holding state
+	#START: ---> SX
+
+\-------------------------------------------------------------------------
+\State Set 6 - Inactive Nosepoke Counter
+
+S.S.6,
+S1,	\State 1 responds to the start command, showing data
+	#START ! #R^PortEntry: SHOW 3, Inactive Nosepokes, A(1) ---> S2
+
+S2,	\State 2 counts the number of inactive nosepokes
+	#RZ(7): ADD A(1), G(T); SET C(K) = X(1);
+	ADD K; SET C(K) = -987.987; SHOW 3, Inactive Nosepokes, A(1) ---> SX
+
+	#Z^PresentLever: ---> S3
+	#Z^Shutdown: ---> S4
+
+S3,	\State 3 counts inactive nosepokes while the lever is extended
+	#RZ(7): ADD A(1), A(5), G(T); SET C(K) = X(1);
+	ADD K; SET C(K) = -987.987; SHOW 3, Inactive Nosepokes, A(1) ---> SX
+
+	#Z^RetractLever: ---> S2
+	#Z^Shutdown: ---> S4
+
+S4,	\State 4 is a holding state
+	#START: ---> SX
+
+\-------------------------------------------------------------------------
+\State Set 9 - Pre-session screen updater and housekeeping
+
+S.S.9,
+S1,	\State 1 shows key session control variables on the screen
+	1": SHOW 1, Session Length, Z(0), 2, Number of Timebins, Z(1);
+	SHOW 3, CS Duration (s), Z(5), 4, Active Nosepoke (5L 6R), Z(6);
+	SHOW 5, Inactive Nosepoke (5L 6R), Z(7);
+
+	IF S.S.1 > 2 [@MISSED, @STAY]
+		@MISSED: SET W = SECSTODAY, Y = W + Z(0) * 60 - Z(8) * 60;
+		SET W = Y / 3600, Y = W;
+		~W := Trunc(W);~; ~Y := Frac(Y);~;
+		SET Y = Y * 60; ~Y := Round(Y);~;
+		IF Y >=60 [@ADD, @OK]
+			@ADD: ADD W; SHOW 6, Come Back At, W; SET Y = Z(0) / 2 * 1' ---> S2
+			@OK: SET W = W + Y / 100; SHOW 6, Come Back At, W; SET Y = Z(0) / 2 * 1' ---> S2
+		@STAY: ---> SX
+
+	#START ! #R^PortEntry: SET W = SECSTODAY, Y = W + Z(0) * 60 - Z(8) * 60;
+		SET W = Y / 3600, Y = W;
+		~W := Trunc(W);~; ~Y := Frac(Y);~;
+		SET Y = Y * 60; ~Y := Round(Y);~;
+		IF Y >=60 [@ADD, @OK]
+			@ADD: ADD W; SHOW 6, Come Back At, W; SET Y = Z(0) / 2 * 1' ---> S2
+			@OK: SET W = W + Y / 100; SHOW 6, Come Back At, W; SET Y = Z(0) / 2 * 1' ---> S2
+
+S2,	\State 2 waits to clear the come back time
+	Y#T: CLEAR 6, 6 ---> S3
+
+S3,	\State 3 is a holding state
+	#sTART: ---> SX
+
+\-------------------------------------------------------------------------
+\RELEASE NOTES: Version 1.00
+\-------------------------------------------------------------------------
+\
+\ This program will run a conditioned reinforcement test for a single lever
+\ autoshaping paradigm. The session begins with a houselight that is locked
+\ on (i.e. will remain on even after the session is finished).
+\
+\ The user can select which of two nosepokes is the active nosepoke.
+\
+\ The active nosepoke will result in lever presentations initially on a 
+\ fixed ratio schedule (determined by the user).
+\
+\ After a certain number of lever presentations, the reinforcement schedule
+\ will be changed to a variable ratio. The inactive nosepoke will be counted
+\ but has no programmed consequences. If the user does not select the active
+\ nosepoke, then it will be automatically determined based on BOX.
+\
+\-------------------------------------------------------------------------
+\ MIT License
+\
+\ Copyright (c) 2017 Shaun Khoo
+\
+\ Permission is hereby granted, free of charge, to any person obtaining a copy
+\ of this software and associated documentation files (the "Software"), to deal
+\ in the Software without restriction, including without limitation the rights
+\ to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+\ copies of the Software, and to permit persons to whom the Software is
+\ furnished to do so, subject to the following conditions:
+\
+\ The above copyright notice and this permission notice shall be included in all
+\ copies or substantial portions of the Software.
+\
+\ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+\ IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+\ FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+\ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+\ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+\ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+\ SOFTWARE.
+\-------------------------------------------------------------------------
+	
